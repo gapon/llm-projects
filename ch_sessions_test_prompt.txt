@@ -1,0 +1,31 @@
+У меня есть таблица events. В этой таблице хранятся события пользователей в мобильном приложении. В таблице есть поля event_id, user_id, created_at, event_name. Напиши мне sql-запрос для ClickHouse, который объединит события пользователей в пользовательские сессии и посчитает кол-во сессий по дням. Сессией нужно считать все события пользователя, время между которыми не превышает 30 минут.
+
+
+
+with events_ordered as (
+  select
+    event_id,
+    user_id,
+    created_at,
+    event_name,
+    lagInFrame(created_at) over (partition by user_id order by created_at) as prev_created_at
+  from events
+),
+sessions_flagged as (
+  select
+    *,
+    if(prev_created_at is null or created_at - prev_created_at > interval 30 minute, 1, 0) as is_new_session
+  from events_ordered
+),
+sessions_grouped as (
+  select
+    *,
+    sum(is_new_session) over (partition by user_id order by created_at rows unbounded preceding) as session_id
+  from sessions_flagged
+)
+select
+  toStartOfDay(created_at) as session_day,
+  count(distinct (user_id, session_id)) as sessions_count
+from sessions_grouped
+group by session_day
+order by session_day
